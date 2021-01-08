@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.6.0;
+pragma solidity 0.6.12;
 
 import {SafeMath} from "@openzeppelin/contracts/math/SafeMath.sol";
 import {IERC20, ERC20, ERC20Pausable} from "@openzeppelin/contracts/token/ERC20/ERC20Pausable.sol";
@@ -13,6 +13,15 @@ contract SLNToken is ERC20Pausable, Ownable {
     uint256 private teamVal;
     address private teamAddress;
     address private poolAddress;
+
+    mapping (address => bool) private blockedlist;
+
+    event claimValue(address, address, uint256);
+
+    modifier onlyPooler() {
+        require(msg.sender == poolAddress, "only call by pool");
+        _;
+    }
 
     constructor(
             address _premint,
@@ -34,18 +43,12 @@ contract SLNToken is ERC20Pausable, Ownable {
         require(totalVal == totalSupply());
     }
 
-    event claimValue(address, address, uint256);
-
-    modifier onlyPooler() {
-        require(msg.sender == poolAddress, "only call by pool");
-        _;
-    }
-
-    function setTeamAddress(address _teamAddress) public onlyOwner {
+    function setTeamAddress(address _teamAddress) external onlyOwner {
+        require(_teamAddress != address(0), "zero address is not allowed!");
         teamAddress = _teamAddress;
     }
     
-    function setPoolAddress(address _poolAddress) public onlyOwner {
+    function setPoolAddress(address _poolAddress) external onlyOwner {
         poolAddress = _poolAddress;
         _approve(address(this), poolAddress, totalSupply()*835/1000);
     }
@@ -76,7 +79,7 @@ contract SLNToken is ERC20Pausable, Ownable {
         return _first * flatRatio / 100;
     }
 
-    function tokensThisWeek() public view returns (uint256) {
+    function tokensThisWeek() external view returns (uint256) {
         uint256 aweeks = (now - timeBegin) / (1 weeks);
         uint256 pFirstVal = totalSupply() * 5 / 100;  // firstVal = totalSupply * 5% 
         uint256 aweeklast = _makeLastWeek(pFirstVal, aweeks + 1);
@@ -101,7 +104,7 @@ contract SLNToken is ERC20Pausable, Ownable {
         return _calcMintValue() * 7850 / 8635;
     }
 
-    function claim(address _to, uint256 _value) public onlyPooler returns (bool) {
+    function claim(address _to, uint256 _value) external onlyPooler returns (bool) {
         // obtain income from the mining pool
         require(_value <= calcPoolValue().sub(poolVal), "not enough tokens");
         poolVal = poolVal.add(_value);
@@ -123,9 +126,8 @@ contract SLNToken is ERC20Pausable, Ownable {
         emit claimValue(msg.sender, teamAddress, value);
     }
 
-    mapping (address => bool) private blockedlist;
-
-    function setBlockedlist(address _address, bool _blocked) public onlyOwner {
+    function setBlockedlist(address _address, bool _blocked) external onlyOwner {
+        require(blockedlist[_address] != _blocked);
         blockedlist[_address] = _blocked;
     }
 

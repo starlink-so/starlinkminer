@@ -1,6 +1,6 @@
 
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.6.0;
+pragma solidity 0.6.12;
 
 import {SafeMath} from "@openzeppelin/contracts/math/SafeMath.sol";
 import {IERC20, ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -14,20 +14,6 @@ pragma experimental ABIEncoderV2;
 contract WordFund is ERC721, Ownable {
     using SafeMath for uint256;
     
-    address public poolAddress;
-    uint256 public poolId;
-    uint256 public relatedPoolId;
-
-    function setPoolAddress(address _poolAddress) public onlyOwner {
-        poolAddress = _poolAddress;
-    }
-
-    function setRelatedPoolId(uint256 _poolId, uint256 _relatedPoolId) public onlyOwner {
-        poolId = _poolId;
-        relatedPoolId = _relatedPoolId;
-    }
-
-    // Word Data
     struct worddata{
         address owner;              // The leader in the bidding
         uint256 collateral;         // amount of collateral
@@ -40,15 +26,12 @@ contract WordFund is ERC721, Ownable {
 
     worddata[] public words;  // Word Data List
     
-    uint256 public biddingLockingPeriod = (4 hours);
-    uint256 public positionLockingPeriod = (15 days);
+    uint256 public constant biddingLockingPeriod = (4 hours);
+    uint256 public constant positionLockingPeriod = (15 days);
 
-    constructor() public ERC721('GOOG-Token', 'GOOG') {
-    }
-
-    function wordsLength() public view returns (uint256) {
-        return words.length;
-    }
+    address public poolAddress;
+    uint256 public poolId;
+    uint256 public relatedPoolId;
 
     event addWord(address from, uint256 wordid, string word);
     event biddingWord(address indexed from, uint256 indexed wordid, uint256 indexed poolid, uint256 value, 
@@ -59,13 +42,31 @@ contract WordFund is ERC721, Ownable {
 
     event claimInvoked(address from, uint256 poolid, uint256 wordid, address to);
 
+    // Word Data
+    constructor() public ERC721('GOOG-Token', 'GOOG') {
+    }
+
+    function setPoolAddress(address _poolAddress) external onlyOwner {
+        poolAddress = _poolAddress;
+    }
+
+    function setRelatedPoolId(uint256 _poolId, uint256 _relatedPoolId) external onlyOwner {
+        poolId = _poolId;
+        relatedPoolId = _relatedPoolId;
+    }
+
+    function wordsLength() external view returns (uint256) {
+        return words.length;
+    }
+
     function lowAmount() public view returns (uint256) {
         uint256 weight;
         (,,,,weight,,,) = StarPools(poolAddress).pools(poolId);
+        require (weight != 0, "weight is zero");
         return 100*(10**18)*(10**9)/weight;
     }
 
-    function addWords(string[] memory wordlist) public onlyOwner returns (uint256) {
+    function addWords(string[] memory wordlist) external onlyOwner returns (uint256) {
         uint256 wordid = 0;
         for(uint256 i = 0; i < wordlist.length; i ++) {
             wordid = words.length;
@@ -76,7 +77,7 @@ contract WordFund is ERC721, Ownable {
         return words.length;
     }
 
-    function setData(uint256 _wordid, string memory _pic, string memory _ext) public {
+    function setData(uint256 _wordid, string memory _pic, string memory _ext) external {
         // set word info data
         require(ownerOf(_wordid) == msg.sender, "only owner can do");
         words[_wordid].pic = _pic;
@@ -99,13 +100,14 @@ contract WordFund is ERC721, Ownable {
         return true;
     }
 
-    function bidding(uint256 _wordid, uint256 _poolid, uint256 _value, address _referrer) public returns (uint256) {
+    function bidding(uint256 _wordid, uint256 _poolid, uint256 _value, address _referrer) external returns (uint256) {
         require(_value > words[_wordid].collateral, "collateral Less than required");
         require(ownerOf(_wordid) == address(this), "held by somebody");
         require(words[_wordid].biddingPeriod == 0 || now - words[_wordid].biddingPeriod < biddingLockingPeriod,
                 "not in bidding period");        
 
         address LPAddress = getPoolLPToken(poolId);
+        require(LPAddress != address(0) , "pool id is not existing!");
 
         // if there is the original owner, refund
         if(words[_wordid].owner != address(0)) {
@@ -141,7 +143,7 @@ contract WordFund is ERC721, Ownable {
         return _value;
     }
 
-    function harvest(uint256 _wordid) public {
+    function harvest(uint256 _wordid) external {
         require(words[_wordid].owner == msg.sender, "not bidding winner");
         require(ownerOf(_wordid) == address(this), "held by someone");
         require(now - words[_wordid].biddingPeriod > biddingLockingPeriod, // 86400 = 60*60*24
@@ -169,7 +171,7 @@ contract WordFund is ERC721, Ownable {
         return true;
     }
 
-    function release(uint256 _wordid) public {
+    function release(uint256 _wordid) external {
         _ishold(_wordid);
 
         if(ownerOf(_wordid) == msg.sender) {
@@ -189,7 +191,7 @@ contract WordFund is ERC721, Ownable {
         words[_wordid].positionLocking = 0;
     }
 
-    function claim(uint256 _wordid, address _to) public returns (bool){
+    function claim(uint256 _wordid, address _to) external returns (bool){
         require(ownerOf(_wordid) == msg.sender || 
                 (ownerOf(_wordid) == address(this) && words[_wordid].owner == msg.sender),  "not allowed");
 

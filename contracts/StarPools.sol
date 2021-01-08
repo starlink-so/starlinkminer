@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.6.0;
+pragma solidity 0.6.12;
 
 import {SafeMath} from "@openzeppelin/contracts/math/SafeMath.sol";
 import {IERC20, ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -9,15 +9,6 @@ import {SLNToken} from "./SLNToken.sol";
 contract StarPools is Ownable {
     using SafeMath for uint256;
 
-    SLNToken public profitToken;
-
-    constructor(
-        address _profitToken
-    ) public {
-        profitToken = SLNToken(_profitToken);
-    }
-
-    // Pool Management mechanism
     struct PoolInfo {
             address LPToken;      // collateral token  10**18
             address LPLimit;      // Restricted contract
@@ -29,18 +20,46 @@ contract StarPools is Ownable {
             // uint256 fundbase;     // starting points
             bool paused;          // pool paused
     }
+
     PoolInfo[] public pools; // pools info
     mapping(uint256 => mapping (address => bool)) private invested;  // Invested
     mapping(uint256 => address[]) private investors;  // investors list
+    mapping (uint256 => mapping (address => uint256)) public deposits;  // amount of collateral per person
+    mapping (uint256 => mapping (address => uint256)) public points;    // amount of points per person
+    mapping (uint256 => mapping (address => uint256)) private extracts;  // person's sln fixed , negative
+    mapping (uint256 => mapping (address => uint256)) private retains;   // person's sln fixed , positive
+    mapping (address => address) public referrers;      // Invitation relationship // DEBUG private
+
+    SLNToken public profitToken;
+
+    uint256 public totalPoints;
+    uint256 private fixPoolValueAdd; // pool total value fixed, positive
+    uint256 private fixPoolValueDec; // pool total value fixed, negative
 
     event factorReset(uint256 poolid, uint256 oldfactor, uint256 newfactor, uint256 users);
+    event depositInvoked(address from, uint256 indexed poolid, address indexed account, uint256 value);
+    event withdrawInvoked(address from, uint256 poolid, address account, uint256 value, address to, uint256 retain);
+    event depositMoveInvoked(address from, uint256 poolid, address account, uint256 value, uint256 topoolid, address toaccount);
+    event joinInvoked(address from, uint256 poolid, address account, uint256 value, uint256 points, uint256 poolValue);
+    event quitInvoked(address from, uint256 poolid, address account, uint256 value, uint256 points, uint256 poolValues);
+    event claimInvoked(address from, uint256 poolid, address account, address to);
+    event claimMoveInvoked(address from, uint256 poolid, address account, uint256 value, uint256 topoolid, address toaccount);
+    event inviter(address, address);
 
-    function poolLength() public view returns (uint256) {
+    constructor(
+        address _profitToken
+    ) public {
+        profitToken = SLNToken(_profitToken);
+    }
+
+    // Pool Management mechanism
+
+    function poolLength() external view returns (uint256) {
         return pools.length;
     }
 
     function addPool(address _LPToken, address _LPLimit, uint256 _factor, uint256 _weight) 
-                    public onlyOwner returns (uint256) {
+                    external onlyOwner returns (uint256) {
         uint256 ending = now + (365 days)*10;  // 10 years
         pools.push(PoolInfo(_LPToken, _LPLimit, 0, _factor, _weight, now, ending, false));
         uint256 poolid = pools.length-1;
@@ -49,7 +68,8 @@ contract StarPools is Ownable {
     }
 
     function setPool(uint256 _poolid, address _LPLimit, uint256 _start, uint256 _ending,
-                    bool _paused) public onlyOwner returns (uint256) {
+                    bool _paused) external onlyOwner returns (uint256) {
+        require(_poolid < pools.length , "pool id is not existing!");
         pools[_poolid].LPLimit = _LPLimit;
         pools[_poolid].start = _start;
         pools[_poolid].ending = _ending;  // 10 years
@@ -57,7 +77,7 @@ contract StarPools is Ownable {
         return _poolid;
     }
 
-    function setLiveFactor(uint256 _poolid, uint256 _factor, uint256 _weight) public onlyOwner {
+    function setLiveFactor(uint256 _poolid, uint256 _factor, uint256 _weight) external onlyOwner {
         address account;
         uint256 value;
 
@@ -78,12 +98,7 @@ contract StarPools is Ownable {
     }
 
     // Investment mechanism
-    mapping (uint256 => mapping (address => uint256)) public deposits;  // amount of collateral per person
-    event depositInvoked(address from, uint256 indexed poolid, address indexed account, uint256 value);
-    event withdrawInvoked(address from, uint256 poolid, address account, uint256 value, address to, uint256 retain);
-    event depositMoveInvoked(address from, uint256 poolid, address account, uint256 value, uint256 topoolid, address toaccount);
-
-    function deposit(uint256 _poolid, address _account, uint256 _value, address _referrer) public returns (bool) {
+    function deposit(uint256 _poolid, address _account, uint256 _value, address _referrer) external returns (bool) {
         // Add collateral
         require(!pools[_poolid].paused && pools[_poolid].ending > now && pools[_poolid].start < now, "pool had paused or not started");
         // require((pools[_poolid].LPLimit == address(0) && _account == msg.sender) || 
@@ -108,7 +123,7 @@ contract StarPools is Ownable {
         return true;
     }
 
-    function withdraw(uint256 _poolid, address _account, address _to) public {
+    function withdraw(uint256 _poolid, address _account, address _to) external {
         // withdraw collateral
         require(!pools[_poolid].paused, "pool had paused");
         require((pools[_poolid].LPLimit == address(0) && _account == msg.sender) || 
@@ -130,7 +145,7 @@ contract StarPools is Ownable {
 
     function depositMove(uint256 _poolid, address _account, uint256 _value, 
                 uint256 _topoolid, address _toaccount) 
-                public returns (bool)  {
+                external returns (bool)  {
 
         require(!pools[_poolid].paused && !pools[_topoolid].paused, "pool or topoolid had paused");
         require(pools[_poolid].LPLimit == msg.sender || pools[_topoolid].LPLimit == msg.sender, "must call from limit");
@@ -153,19 +168,6 @@ contract StarPools is Ownable {
     }
 
     // Mining mechanism
-    uint256 public totalPoints;
-    uint256 private fixPoolValueAdd; // pool total value fixed, positive
-    uint256 private fixPoolValueDec; // pool total value fixed, negative
-
-    mapping (uint256 => mapping (address => uint256)) public points;    // amount of points per person
-    mapping (uint256 => mapping (address => uint256)) private extracts;  // person's sln fixed , negative
-    mapping (uint256 => mapping (address => uint256)) private retains;   // person's sln fixed , positive
-
-    event joinInvoked(address from, uint256 poolid, address account, uint256 value, uint256 points, uint256 poolValue);
-    event quitInvoked(address from, uint256 poolid, address account, uint256 value, uint256 points, uint256 poolValues);
-    event claimInvoked(address from, uint256 poolid, address account, address to);
-    event claimMoveInvoked(address from, uint256 poolid, address account, uint256 value, uint256 topoolid, address toaccount);
-
     function _profitnow(uint256 _points) internal view returns (uint256) {
         // Calculate the current income of the share
         uint256 PoolVal = profitToken.calcPoolValue()
@@ -251,7 +253,7 @@ contract StarPools is Ownable {
     }
 
     // claim profit or Extended contract claim profit
-    function claim(uint256 _poolid, address _account, address _to) public returns (bool)  {
+    function claim(uint256 _poolid, address _account, address _to) external returns (bool)  {
         require(!pools[_poolid].paused, "pool had paused");
 
         uint256 extVal = balanceOf(_poolid, _account);
@@ -274,7 +276,7 @@ contract StarPools is Ownable {
     }
 
     // Extended contract claim profit
-    function claimMove(uint256 _poolid, address _account, uint256 _topoolid, address _toaccount) public returns (bool)  {
+    function claimMove(uint256 _poolid, address _account, uint256 _topoolid, address _toaccount) external returns (bool)  {
         require(!pools[_poolid].paused && !pools[_topoolid].paused, "pool topoolid had paused");
         require(pools[_poolid].LPLimit == msg.sender || pools[_topoolid].LPLimit == msg.sender, "must call from limit");
 
@@ -292,25 +294,22 @@ contract StarPools is Ownable {
     }
 
     // Invitation mechanism
-    mapping (address => address) public referrers;      // Invitation relationship // DEBUG private
-    event inviter(address, address);
-
-    function _setInviter(address _account, address _referrer) internal returns (bool) {
+    function _setInviter(address _account, address _referrer) internal {
         if(_referrer == address(0)) {
-            return false;
+            return;
         }
         if(referrers[_account] != address(0)) {
-            return false;
+            return;
         }
         require(_account != _referrer, "Invite yourself?");
 
         referrers[_account] = _referrer;
         emit inviter(_account, _referrer);
-        return true;
+        return;
     }
 
     // For ui display
-    function annualPerShare(uint256 _poolid) public view returns (uint256) {
+    function annualPerShare(uint256 _poolid) external view returns (uint256) {
         uint256 value = profitToken.tokensThisWeek() * 900 / 1000;
         if(totalPoints > 0){
             value = value * 1 * pools[_poolid].factor *  pools[_poolid].weight / totalPoints;
