@@ -24,8 +24,9 @@ contract SLNToken is ERC20Pausable, Ownable {
     }
 
     constructor(
+            uint256 _totalSupply,
             address _premint,
-            address _foundation,
+            address _investor,
             address _team
         ) public ERC20('SLN-Token', 'SLN') {
 
@@ -33,14 +34,13 @@ contract SLNToken is ERC20Pausable, Ownable {
         teamAddress = _team;
 
         // 初始挖
-        uint256 totalVal = (1*10**8)*(10**18);
+        uint256 totalVal = _totalSupply;
 
-        _mint(address(this), totalVal*8635/10000); // 86.8%% for  8635%% = 7850%% pool and 785%% team mint
-        _mint(_premint, totalVal*150/10000);     // 150%% for pool premint
-        _mint(teamAddress, totalVal*15/10000);   // 15%% for team premint
-        _mint(_foundation, totalVal*1200/10000); // 1200%% for foundation
+        _mint(address(this), totalVal*9699/10000);  // 9699%% for 9699%% =  8999/9699 for pool and 700/9699 for team and business
+        _mint(_premint, totalVal*1/10000);          // 1%% for pool premint
+        _mint(_investor, totalVal*300/10000);     // 300%% for foundation to vc investor, release weekly
 
-        require(totalVal == totalSupply());
+        require(_totalSupply == totalSupply());
     }
 
     function setTeamAddress(address _teamAddress) external onlyOwner {
@@ -101,7 +101,7 @@ contract SLNToken is ERC20Pausable, Ownable {
 
     function calcPoolValue() public view returns (uint256) {
         // Calculate mining output for miner
-        return _calcMintValue() * 7850 / 8635;
+        return _calcMintValue() * 8999 / 9699;
     }
 
     function claim(address _to, uint256 _value) external onlyPooler returns (bool) {
@@ -116,7 +116,7 @@ contract SLNToken is ERC20Pausable, Ownable {
 
     function teamClaim() public {
         // obtain team income from the mining pool
-        uint256 curval =  _calcMintValue() * 785 / 8635;
+        uint256 curval =  _calcMintValue() * 700 / 9699;
         uint256 value = curval.sub(teamVal);
         if(value == 0){
             return;
